@@ -1,0 +1,134 @@
+/*----------------------------------------------------------------------------------------------
+Date: 31/03/2019
+Modified: None
+Description: This program receives the tag ID from the RFID module serially.
+----------------------------------------------------------------------------------------------*/
+// Preprocessor ------------------------------------------------------------------------------
+#include "mbed.h"
+//Constants------------------------------------------------------------------------
+#define TRUE 1
+#define FALSE 0
+#define BUFSIZE 50
+#define SIZE 3
+DigitalOut relay(p8); //Output
+DigitalOut reset(p25);
+Serial rFID(p9,p10,115800);
+Serial pc(USBTX, USBRX);
+char rcbuffer[BUFSIZE];
+char *uID;
+char *tags[SIZE];
+int sentenceReady=0;
+// --- Function Header ---
+/*--- serialISR ---------------------------------------------------------------------------
+Date: 04/03/2019
+Modified: None
+Desc: Collects the command sentance and stores it in a buffer string.
+Input: No Inputs
+Returns: None
+--------------------------------------------------------------------------------------------*/
+void serialISR()
+{
+int index=0;
+if(rFID.readable())
+{
+for(index=0;index<BUFSIZE;index++)
+{
+rcbuffer[index]=rFID.getc();
+if(rcbuffer[index]==']')
+{
+index=BUFSIZE;
+sentenceReady=TRUE;
+}
+}
+}
+}
+// --- Function Header ---
+/*--- validateTag ---------------------------------------------------------------------------
+Date: 04/03/2019
+Modified: None
+Desc: Checks if the UID extracted is valid or not.
+Input: No Input
+Returns: None
+--------------------------------------------------------------------------------------------*/
+void validateTag(void)
+{
+int index=0;
+char access=FALSE;
+for(index=0;index<SIZE;index++)
+{
+if(strcmp(tags[index],uID)==0)
+{
+pc.printf("Valid Tag\n\r");
+relay=1;
+access=TRUE;
+}
+}
+if(!access)
+{
+pc.printf("InValid Tag\n\r");
+}
+}
+// --- Function Header ---
+/*--- storeTagValue ---------------------------------------------------------------------------
+Date: 04/03/2019
+Modified: None
+Desc: Stores Authorized set of tag values.
+Input: No Inputs
+Returns: None
+--------------------------------------------------------------------------------------------*/
+void storeTagValues()
+{
+tags[0]="7A7CD6564AC007E0";
+tags[1]="A942D6564AC007E0";
+tags[2]="1B60F7564AC007E0";
+}
+// --- Function Header ---
+/*--- getUID ---------------------------------------------------------------------------
+Date: 04/03/2019
+Modified: None
+Desc: Extracts the UID from the received command.
+Input: *pbuf, a character pointer that points to the receive buffer string
+Returns: None
+--------------------------------------------------------------------------------------------*/
+void getUID(char *pbuf)
+{
+char checksumFlag=FALSE;
+unsigned char count=strlen(pbuf);
+while(checksumFlag!=TRUE)
+{
+if(*(pbuf+count)==',')
+{
+*(pbuf+count)=0x00;
+}
+if(*(pbuf+count)=='[')
+{
+uID=pbuf+count+1;
+checksumFlag=TRUE;
+}
+count--;
+}
+}
+/*--- MAIN FUNCTION -------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------*/
+int main()
+{
+char enableExternalAntenna[]={"01080003042B0000"};
+rFID.puts(enableExternalAntenna);
+rFID.attach(&serialISR);
+storeTagValues();
+while(1)
+{
+reset=1;
+if(sentenceReady)
+{
+pc.printf("Tag Value:%s\n\r",rcbuffer);
+getUID(rcbuffer);
+validateTag();
+wait(0.5);
+sentenceReady=FALSE;
+}
+else
+{
+relay=FALSE;
+}
+}
