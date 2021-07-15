@@ -1,0 +1,557 @@
+1.	RTC Test
+/*--------------program header----------------------------------------------------------------------
+File Name: RTC Test
+Author: Kuntal Bhatt
+Date: 14-07-2019
+Modified: None
+Description: This program will test the Real time clock and show the output on cool term.
+--------------------------------------------------------------------------------------------------------------*/
+//---------------preprocessor--------------------------------------------------------------------------
+#include <built_in.h>
+
+//---------------constants--------------------------------------------------------------------------------
+#define RTC_ADDR  0xD0        // RTC
+#define SIZE  30
+
+//---------global variables-------------------------------------------------------------------------------
+bit select_bit, sensorLDR;
+char rfidData [SIZE];
+char uart_rd;
+unsigned char hours, minutes, seconds, day, week, month, year;   // Global date/time variables
+unsigned char hours1, minutes1, seconds1, day1, month1, year1;
+signed char hours_setting, secs_setting, mins_setting, day_setting, week_setting, month_setting, year_setting,hour1,hour2;
+char txt_time[20], txt_date[20];
+
+/*------------------Read_Time----------------------------------------------------------------------
+Author: Kuntal Bhatt
+Date:14-07-2019
+Modified: None
+Description: This function set the functions of clock and read the details
+Input: None
+Return: None
+---------------------------------------------------------------------------------------------------------*/
+//--------------------- Reads time and date information from RTC (DS1307)
+
+void Read_Time(unsigned char *p_hours, unsigned char *p_minutes, unsigned char *p_seconds, unsigned char *p_day, unsigned char *p_week, unsigned char *p_month, unsigned char *p_year)
+{
+  I2C2_Start();                // Issue start signal
+  I2C2_Wr(RTC_ADDR);           // Address DS1307, see DS1307 datasheet
+  I2C2_Wr(0);                  // Start from address 0
+  I2C2_Repeated_Start();       // Issue repeated start signal
+  I2C2_Wr(RTC_ADDR + 1);       // Address DS1307 for reading R/W=1
+
+  *p_seconds = I2C1_Rd(1);     // Read seconds byte
+  *p_minutes = I2C1_Rd(1);     // Read minutes byte
+  *p_hours   = I2C1_Rd(1);     // Read hours byte
+  *p_week    = I2C1_Rd(1);
+  *p_day     = I2C1_Rd(1);
+  *p_month   = I2C1_Rd(1);
+  *p_year    = I2C1_Rd(0);
+
+   I2C2_Stop();                 // Issue stop signal
+}
+
+/*----------Write_Time----------------------------------------------------------------------------------
+Author: Kuntal Bhatt
+Date:14-07-2019
+Modified: None
+Description: This function set the functions of clock and write the details.
+Input: None
+Return: None
+------------------------------------------------------------------------------------------------------------*/
+void Write_Time(unsigned char c_hours, unsigned char c_minutes, unsigned char c_seconds,
+unsigned char c_day, unsigned char c_week, unsigned char c_month, unsigned char c_year)
+{
+   I2C1_Start();                     // issue start signal
+   I2C1_Wr(RTC_ADDR);                // address DS1307
+   I2C1_Wr(0);                       // start from word at address (REG0)
+   I2C1_Wr(0x80);                    // write $80 to REG0. (pause counter + 0 sec)
+
+   I2C1_Wr(c_minutes);               // write 0 to minutes word to (REG1)
+   I2C1_Wr(c_hours);                 // write 17 to hours word (24-hours mode)(REG2)
+   I2C1_Wr(c_week);                  // write 2 - Monday (REG3)
+   I2C1_Wr(c_day);                   // write 4 to date word (REG4)
+   I2C1_Wr(c_month);                 // write 5 (May) to month word (REG5)
+   I2C1_Wr(c_year);                  // write 01 to year word (REG6)
+   I2C1_Stop();                      // issue stop signal
+
+   I2C1_Start();                     // issue start signal
+   I2C1_Wr(RTC_ADDR);                // address DS1307
+   I2C1_Wr(0);                       // start from word at address 0
+   I2C1_Wr(0 | c_seconds);           // write 0 to REG0 (enable counting + 0 sec)
+   I2C1_Stop();                    // issue stop signal
+
+}
+
+/*----------Transform_Time----------------------------------------------------------------------------------
+Author: Kuntal Bhatt
+Date:14-07-2019
+Modified: None
+Description: This function set the functions of clock and transform the details.
+Input: None
+Return: None
+------------------------------------------------------------------------------------------------------------*/
+
+void Transform_Time()
+{
+  seconds  =  ((seconds & 0x70) >> 4)*10 + (seconds & 0x0F);
+  minutes  =  ((minutes & 0xF0) >> 4)*10 + (minutes & 0x0F);
+  hours    =  ((hours & 0x30) >> 4)*10 + (hours & 0x0F);
+  week     =  (week & 0x07);
+  day      =  ((day & 0xF0) >> 4)*10 + (day & 0x0F);
+  month    =  ((month & 0x10) >> 4)*10 + (month & 0x0F);
+  year     =  ((year & 0xF0)>>4)*10+(year & 0x0F);
+
+}
+
+/*----------serialConfig----------------------------------------------------------------------------------
+Author: Kuntal Bhatt
+Date:14-07-2019
+Modified: None
+Description: This function configure the serial port.
+Input: None
+Return: None
+-----------------------------------------------------------------------------------------------------------*/
+void serialConfig()
+{
+ UART1_Init(9600);
+ delay_ms(200);
+}
+
+/*----------portConfig----------------------------------------------------------------------------------
+Author: Kuntal Bhatt
+Date:14-07-2019
+Modified: None
+Description: This function configure the ports.
+Input: None
+Return: None
+------------------------------------------------------------------------------------------------------------*/
+void portConfig(void)
+{
+ ANSELA = 0x00;
+ LATA = 0x00;
+ TRISA=0xFF;
+
+ ANSELB = 0x00;
+ LATB = 0x00;
+ TRISB=0xFF;
+
+ ANSELC = 0x00;
+ LATC = 0x00;
+ TRISC=0xFF;
+
+ ANSELD = 0x00;
+ LATD = 0x00;
+ TRISD=0xFF;
+}
+
+/*----------initializeSystem----------------------------------------------------------------------------------
+Author: Kuntal Bhatt
+Date:14-07-2019
+Modified: None
+Description: This function will call all the functions.
+Input: None
+Return: None
+----------------------------------------------------------------------------------------------------------------*/
+void intializeSystem()
+{
+ portConfig();
+ InitTimer0();
+ serialConfig();
+}
+
+//---------------------MAIN---------------------------------------------------------------------------------------
+void main()
+{
+  
+  OSCCON=0b01110110; //osccon = 0x62;
+  intializeSystem();
+  delay_ms(500);
+  select_bit=0;
+  sensorLDR=0;
+  UART1_Init(9600);
+  delay_ms(200);
+  I2C1_Init(100000);
+  //DataRead();
+  delay_ms(500);
+  UART1_Write_Text("system ready\n\r");
+                while(1)
+ {
+Read_Time(&hours, &minutes, &seconds, &day, &week, &month, &year);           // Read time from RTC()
+ Transform_Time();        // Format date and time
+  
+ uart1_write_text(txt_date);
+ uart1_write_text("|");
+  uart1_write_text(txt_time);
+  uart1_write_text("#");
+  
+  }
+}
+2.	RFID Tag Status
+/*---------------program header---------------------------------------------------------------------------
+File Name: RFID Tag Status Test
+Author: Kuntal Bhatt
+Date: 14-07-2019
+Modified: None
+Description: This program will check the status of tag and show the output on cool term.
+-------------------------------------------------------------------------------------------------------------------*/
+
+//---preprocessor-------------------------------------------------------------------------------------
+#include <built_in.h>
+
+//---constants-------------------------------------------------------------------------------------------
+#define SIZE  30
+
+//---global variables-----------------------------------------------------------------------------------
+bit select_bit,sensorLDR;
+char rfidData[SIZE];
+char uart_rd[10];
+int ii=0;
+
+//--------------------------function header------------------------------------------------------------
+/*----------serialConfig----------------------------------------------------------------------------------
+Author: Kuntal Bhatt
+Date:14-07-2019
+Modified: None
+Description: This function configure the serial port.
+Input: None
+Return: None
+------------------------------------------------------------------------------------------------------------*/
+void serialConfig()
+{
+ UART1_Init(9600);
+ delay_ms(200);
+}
+
+/*---------collectString----------------------------------------------------------------------------------
+Author: Kuntal Bhatt
+Date:14-07-2019
+Modified: None
+Description: This function will collect the String.
+Input: None
+Return: String on display terminal
+------------------------------------------------------------------------------------------------------------*/
+
+void collectString(char *ptr)
+{
+     char check=0;
+     while(check!='E')
+     {
+       if(PIR1.RC1IF==1 && sensorLDR==0)
+       {
+        check = RCREG1;
+        *ptr = check ;
+        ptr++;
+       }
+     }
+}
+//Timer0
+//Prescaler 1:8; TMR0 Preload = 6; Actual Interrupt Time : 1 ms
+
+//Place/Copy this part in declaration section
+
+/*----------InitTimer0----------------------------------------------------------------------------------
+Author: Kuntal Bhatt
+Date:14-07-2019
+Modified: None
+Description: This function will configure the Timer0.
+Input: None
+Return: None
+------------------------------------------------------------------------------------------------------------*/
+
+void InitTimer0()
+{
+  T0CON         = 0xC2;
+  TMR0L         = 0x06;
+  GIE_bit         = 1;
+  TMR0IE_bit         = 1;
+}
+
+/*----------Interrupt----------------------------------------------------------------------------------
+Author: Kuntal Bhatt
+Date:14-07-2019
+Modified: None
+Description: This function configure the interrupt flag.
+Input: None
+Return: None
+------------------------------------------------------------------------------------------------------------*/
+
+void Interrupt()
+{
+  if (TMR0IF_bit)
+{
+    TMR0IF_bit = 0;
+    TMR0L         = 0x06;
+  }
+}
+ 
+/*----------portConfig----------------------------------------------------------------------------------
+Author: Kuntal Bhatt
+Date:14-07-2019
+Modified: None
+Description: This function configure the port.
+Input: None
+Return: None
+------------------------------------------------------------------------------------------------------------*/
+                                        
+void portConfig(void)
+{
+ ANSELA = 0x00;
+ LATA = 0x00;
+ TRISA=0xFF;
+
+ ANSELB = 0x00;
+ LATB = 0x00;
+ TRISB=0xFF;
+
+ ANSELC = 0x00;
+ LATC = 0x00;
+ TRISC=0xFF;
+
+ ANSELD = 0x00;
+ LATD = 0x00;
+ TRISD=0xFF;
+}
+
+/*----------initializeSystem----------------------------------------------------------------------------------
+Author: Kuntal Bhatt
+Date:14-07-2019
+Modified: None
+Description: This function will call all the functions.
+Input: None
+Return: None
+-----------------------------------------------------------------------------------------------------------------*/
+
+void intializeSystem()
+{
+ portConfig();
+ InitTimer0();
+ serialConfig();
+}
+
+//-------------MAIN--------------------------------------------------------------------------------------
+void main() 
+{
+OSCCON = 0x62;
+intializeSystem();
+delay_ms(500);
+select_bit=0;
+sensorLDR=0;
+ UART1_Init(9600);
+ delay_ms(200);
+UART1_Write_Text("system ready\n\r");
+
+while(1)
+{
+collectString(rfidData);
+UART1_Write_Text(rfidData);
+delay_ms(1000);
+ if (UART1_Data_Ready()) 
+    {     // If data is received,
+      uart_rd[ii] = UART1_Read();     // read the received data,
+      ii++;
+      uart_rd[8]='\0';
+       delay_ms(10);
+       if( uart_rd[4]==0xAB)
+       {
+        UART1_write_text("ok\n\r");
+       }
+       else if(uart_rd[5]==0xCD)
+       {
+           UART1_write_text("second ok\n\r");
+       }
+      //UART1_Write(uart_rd);       // and send data via UART
+     delay_ms(10);
+    }
+ 
+}
+}
+
+
+
+
+3.	SD Card
+
+               /*---------------program header------------------------------------------------------------------------
+File Name: SD Card Test
+Author: Kuntal Bhatt
+Date: 14-07-2019
+Modified: None
+Description: This program will test the SD Card and check the data which are logged.
+               ----------------------------------------------------------------------------------------------------------------*/
+//-----constants----------------------------------------------------------------------------------------------
+#define CR 0x0D // carriage return
+#define LF 0x0A // line feed
+
+//-----global variables----------------------------------------------------------------------------------------
+typedef unsigned short      uint8;
+typedef   signed short      int8;
+
+//  modes of file operation:
+//      - read   ( resets cursor to 0 )
+//      - write  ( resets cursor to 0 )
+//      - append ( leaves cursor as is )
+
+static const uint8
+    FILE_READ       = 0x01,
+    FILE_WRITE      = 0x02,
+    FILE_APPEND     = 0x04;
+
+// Mmc Library requirements
+sbit Mmc_Chip_Select           at RC0_bit;
+sbit Mmc_Chip_Select_Direction at TRISC0_bit;
+
+// SPI initialization routines required by Mmc Library
+
+
+/*----------initSPI---------------------------------------------------------------------------------------
+Author: Kuntal Bhatt
+Date:14-07-2019
+Modified: None
+Description: This function initialize the interrupt for serial peripheral.
+Input: None
+Return: None
+------------------------------------------------------------------------------------------------------------*/
+
+void initSPI(void)
+{
+    SPI1_Init_Advanced(_SPI_MASTER_OSC_DIV64, _SPI_DATA_SAMPLE_MIDDLE, _SPI_CLK_IDLE_LOW, _SPI_LOW_2_HIGH);
+}
+
+/*----------initFastSPI----------------------------------------------------------------------------------
+Author: Kuntal Bhatt
+Date:14-07-2019
+Modified: None
+Description: This function initialize the interrupt for serial peripheral for fast operation.
+Input: None
+Return: None
+------------------------------------------------------------------------------------------------------------*/
+
+void initFastSPI(void)
+{
+    SPI1_Init_Advanced(_SPI_MASTER_OSC_DIV4, _SPI_DATA_SAMPLE_MIDDLE, _SPI_CLK_IDLE_LOW, _SPI_LOW_2_HIGH);
+}
+int8   err;
+//signed short err;
+short fhandle[4];   // file handle variable should be signed (4 = max files can be open at the same time
+
+//----------MAIN-----------------------------------------------------------------------------------------
+void main() 
+{
+ ANSELC = 0;             // Configure AN pins as digital
+ SLRCON = 0;             // Set output slew rate on all ports at standard rate
+
+ //  UART module initialization
+  UART1_Init(19200);
+  Delay_ms(100);
+
+  UART_Write(CR);
+  //UART_Write_ConstText(line);
+  UART_Write(CR);
+  Delay_ms(100);
+
+  //  SPI module initialization
+    ///////////////////////////////////////
+    initSPI();
+
+  // initialize storage device.
+  //  optionally, we could format the device
+  // instead of just initializing it.
+  ///////////////////////////////////////
+  
+  //Initialize
+    err = FAT32_Init();
+    // err = FAT32_format("dev0");
+    if (err < 0)        //
+    {
+        UART_Write(CR);
+       // UART_Write_Text(constToVar(uartbuf, "init failed"));
+       UART_Write_Text("*****init failed*****");
+        UART_Write(CR);  // carriage return
+        UART_Write(LF);  // line feed
+
+        while(err < 0)  //  ...retry each second
+        {
+            err = FAT32_Init();
+            Delay_ms(1000);
+        }
+    }
+
+   //  if all went well, reinitialize
+    //  SPI with greater speed
+    ///////////////////////////////////////
+    initFastSPI();
+    UART_Write(CR);
+   // UART_Write_Text(constToVar(uartbuf, "init ok"));
+   UART_Write_Text("*****init ok*****");
+    UART_Write(CR);  // carriage return
+    UART_Write(LF);  // line feed
+
+  //   Create a folder
+
+err = 0;
+if (err == FAT32_MakeDir("DIR_A"))  // Create a new folder: DIR_A
+    {
+        UART_Write(CR);
+        UART_Write_Text( "folder DIR_A created");
+        UART_Write(CR);  // carriage return
+        UART_Write(LF);  // line feed
+        
+        err = FAT32_ChangeDir("DIR_A"); // Enter into DIR_A Folder
+        
+        fhandle[0]  = FAT32_Open("TEST.TXT", FILE_APPEND ); //open/create TEXT.TXT
+        fhandle[1]  = FAT32_Open("TEST2.TXT", FILE_APPEND ); //open/create TEXT2.TXT
+          if (fhandle >= 0) 
+         {
+             UART_Write_Text( "files created/open successfully");
+             UART_Write(CR);  // carriage return
+             UART_Write(LF);  // line feed
+             
+             UART_Write_Text ("writing to TEST and TEST2 files...");
+             UART_Write(CR);  // carriage return
+             UART_Write(LF);  // line feed
+             
+             //Write to files
+            for (i = 0; i < 50; i++ ) 
+            {
+             FAT32_Write(fhandle[0], "Hello, this is text written in TEST.TXT", 40);
+             FAT32_Write(fhandle[1], "Hello, and this one is text written in TEST2.TXT", 49);
+
+             UART_Write_Text( "Text written successfully");
+             UART_Write(CR);  // carriage return
+             UART_Write(LF);  // line feed
+             
+           //Close all the files
+             err = FAT32_Close(fhandle[0]); // Close  TEXT.TXT file
+             err = FAT32_Close(fhandle[1]); // Close  TEXT2.TXT file
+
+            if (err == 0) 
+            {  // if the files were previously opened and no error occurred  
+               UART_Write_Text( "files closed successfully");
+               UART_Write(CR);  // carriage return
+               UART_Write(LF);  // line feed
+             }
+
+           }
+           else
+          {
+           UART_Write(CR);
+           UART_Write_Text("files not created");
+           UART_Write(CR);  // carriage return
+           UART_Write(LF);  // line feed
+           }
+    
+    }
+    else 
+    {
+     UART_Write(CR);
+     UART_Write_Text("folder not created");
+     UART_Write(CR);  // carriage return
+     UART_Write(LF);  // line feed
+    }
+  while (1)
+  {
+  ;   //loop
+  }
+
+}
